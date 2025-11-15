@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tournament Manager - Admin Panel</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="dark-mode">
+  <nav class="navbar">
+    <div class="container">
+      <a href="dashboard.html" class="navbar-brand">TournamentHub</a>
+      <ul class="navbar-menu">
+        <li><a href="dashboard.html" class="navbar-link">Dashboard</a></li>
+        <li><a href="find-tournament.html" class="navbar-link">Find Tournament</a></li>
+        <li><a href="create-tournament.html" class="navbar-link">Create Tournament</a></li>
+        <li><a href="profile.html" class="navbar-link">Profile</a></li>
+        <li><a href="#" id="logoutBtn" class="navbar-link">Logout</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="container">
+      <div id="alertContainer"></div>
+
+      <div class="page-header flex-between">
+        <div>
+          <h2 class="page-title" id="tournamentName">Admin Panel</h2>
+          <p class="page-description">Manage tournament participants and settings</p>
+        </div>
+        <button onclick="backToTournament()" class="btn btn-secondary">Back to Tournament</button>
+      </div>
+
+      <!-- Pending Requests Section -->
+      <div style="margin-bottom: 64px;">
+        <h3 style="margin-bottom: 24px;">Pending Join Requests</h3>
+        <div class="card">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Username</th>
+                <th>Requested</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="pendingRequestsTable">
+              <tr>
+                <td colspan="4" class="text-center">No pending requests</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Current Participants Section -->
+      <div style="margin-bottom: 64px;">
+        <h3 style="margin-bottom: 24px;">Current Participants</h3>
+        <div class="card">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Player</th>
+                <th>Username</th>
+                <th>Status</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody id="participantsTable">
+              <tr>
+                <td colspan="4" class="text-center">No participants yet</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Promote to Admin Section -->
+      <div style="margin-bottom: 64px;" id="promoteSection">
+        <h3 style="margin-bottom: 24px;">Promote Participant to Admin</h3>
+        <div class="card">
+          <p class="card-description" style="margin-bottom: 16px;">
+            Select a participant to promote them to tournament admin
+          </p>
+          <div class="flex-gap-sm">
+            <select id="promoteSelect" class="form-select" style="flex: 1;">
+              <option value="">Select a participant...</option>
+            </select>
+            <button onclick="promoteToAdmin()" class="btn btn-primary">Promote to Admin</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Replace Player Modal -->
+  <div id="replaceModal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+    <div class="card" style="max-width: 500px; width: 100%;">
+      <h3 class="card-title">Replace Player</h3>
+      <p class="card-description">Search for a user to replace <strong id="playerToReplace"></strong></p>
+      
+      <div class="form-group">
+        <label class="form-label">Search Users</label>
+        <input 
+          type="text" 
+          id="userSearch" 
+          class="form-input" 
+          placeholder="Search by username or display name"
+          oninput="searchUsers()"
+        >
+      </div>
+
+      <div id="searchResults" style="max-height: 200px; overflow-y: auto; margin-bottom: 16px;"></div>
+
+      <div class="flex-between">
+        <button onclick="closeReplaceModal()" class="btn btn-secondary">Cancel</button>
+        <button id="confirmReplaceBtn" onclick="confirmReplace()" class="btn btn-primary" disabled>Replace Player</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    checkAuth();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const tournamentId = urlParams.get('id');
+    let selectedOldUserId = null;
+    let selectedNewUserId = null;
+    let isHeadAdmin = false;
+
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('currentUser');
+      window.location.href = 'index.html';
+    });
+
+    function backToTournament() {
+      window.location.href = `tournament.html?id=${tournamentId}`;
+    }
+
+    async function loadTournamentName() {
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}`);
+        const tournament = await response.json();
+        document.getElementById('tournamentName').textContent = `${tournament.name} - Admin Panel`;
+
+        // Check if user is head admin
+        const user = getCurrentUser();
+        const adminResponse = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/is-admin/${user.id}`);
+        const adminData = await adminResponse.json();
+        isHeadAdmin = adminData.isHeadAdmin;
+
+        if (!adminData.isAdmin) {
+          showAlert('You do not have admin access to this tournament', 'error');
+          setTimeout(() => {
+            window.location.href = 'dashboard.html';
+          }, 2000);
+        }
+
+        // Only head admin can promote users
+        if (!isHeadAdmin) {
+          document.getElementById('promoteSection').classList.add('hidden');
+        }
+
+      } catch (error) {
+        console.error('Error loading tournament:', error);
+      }
+    }
+
+    async function loadPendingRequests() {
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/pending-requests`);
+        const requests = await response.json();
+
+        const tableBody = document.getElementById('pendingRequestsTable');
+
+        if (requests.length === 0) {
+          tableBody.innerHTML = '<tr><td colspan="4" class="text-center">No pending requests</td></tr>';
+          return;
+        }
+
+        tableBody.innerHTML = requests.map(r => `
+          <tr>
+            <td class="body-strong">${r.display_name}</td>
+            <td>${r.username}</td>
+            <td>${new Date(r.joined_at).toLocaleDateString()}</td>
+            <td>
+              <div class="flex-gap-sm">
+                <button class="btn btn-success btn-sm" onclick="handleRequest(${r.id}, 'approve')">Approve</button>
+                <button class="btn btn-danger btn-sm" onclick="handleRequest(${r.id}, 'deny')">Deny</button>
+              </div>
+            </td>
+          </tr>
+        `).join('');
+
+      } catch (error) {
+        console.error('Error loading requests:', error);
+      }
+    }
+
+    async function loadParticipants() {
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/participants`);
+        const participants = await response.json();
+
+        const tableBody = document.getElementById('participantsTable');
+        const promoteSelect = document.getElementById('promoteSelect');
+
+        if (participants.length === 0) {
+          tableBody.innerHTML = '<tr><td colspan="4" class="text-center">No participants yet</td></tr>';
+          promoteSelect.innerHTML = '<option value="">No participants available</option>';
+          return;
+        }
+
+        tableBody.innerHTML = participants.map(p => {
+          const statusBadge = p.eliminated ? 
+            '<span class="badge badge-denied">Eliminated</span>' : 
+            '<span class="badge badge-approved">Active</span>';
+          
+          return `
+            <tr class="${p.eliminated ? 'eliminated' : ''}">
+              <td class="body-strong player-name">${p.display_name}</td>
+              <td>${p.username}</td>
+              <td>${statusBadge}</td>
+              <td>
+                <div class="flex-gap-sm">
+                  ${!p.eliminated ? `
+                    <button class="btn btn-danger btn-sm" onclick="eliminatePlayer(${p.user_id}, '${p.display_name}')">Eliminate</button>
+                  ` : ''}
+                  <button class="btn btn-secondary btn-sm" onclick="openReplaceModal(${p.user_id}, '${p.display_name}')">Replace</button>
+                </div>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        // Populate promote select
+        promoteSelect.innerHTML = '<option value="">Select a participant...</option>' + 
+          participants.filter(p => !p.eliminated).map(p => 
+            `<option value="${p.user_id}">${p.display_name} (@${p.username})</option>`
+          ).join('');
+
+      } catch (error) {
+        console.error('Error loading participants:', error);
+      }
+    }
+
+    window.handleRequest = async (requestId, action) => {
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/requests/${requestId}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action })
+        });
+
+        if (response.ok) {
+          showAlert(`Request ${action}d successfully`, 'success');
+          await loadPendingRequests();
+          await loadParticipants();
+        } else {
+          showAlert('Failed to process request', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error', 'error');
+      }
+    };
+
+    window.eliminatePlayer = async (userId, playerName) => {
+      if (!confirm(`Are you sure you want to eliminate ${playerName}? All their remaining matches will be forfeited.`)) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/participants/${userId}/eliminate`, {
+          method: 'PUT'
+        });
+
+        if (response.ok) {
+          showAlert('Player eliminated successfully', 'success');
+          await loadParticipants();
+        } else {
+          showAlert('Failed to eliminate player', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error', 'error');
+      }
+    };
+
+    window.openReplaceModal = (oldUserId, playerName) => {
+      selectedOldUserId = oldUserId;
+      selectedNewUserId = null;
+      document.getElementById('playerToReplace').textContent = playerName;
+      document.getElementById('userSearch').value = '';
+      document.getElementById('searchResults').innerHTML = '';
+      document.getElementById('confirmReplaceBtn').disabled = true;
+      document.getElementById('replaceModal').classList.remove('hidden');
+    };
+
+    window.closeReplaceModal = () => {
+      document.getElementById('replaceModal').classList.add('hidden');
+    };
+
+    window.searchUsers = async () => {
+      const query = document.getElementById('userSearch').value.trim();
+      
+      if (query.length < 2) {
+        document.getElementById('searchResults').innerHTML = '';
+        return;
+      }
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/users/search/${query}`);
+        const users = await response.json();
+
+        const resultsContainer = document.getElementById('searchResults');
+        
+        if (users.length === 0) {
+          resultsContainer.innerHTML = '<p style="color: var(--text-secondary-dark); padding: 8px;">No users found</p>';
+          return;
+        }
+
+        resultsContainer.innerHTML = users.map(u => `
+          <div 
+            onclick="selectUser(${u.id}, '${u.display_name}')" 
+            style="padding: 12px; cursor: pointer; border-radius: 8px; margin-bottom: 4px; background: var(--bg-page-dark);"
+            onmouseover="this.style.background='#1F1F1F'" 
+            onmouseout="this.style.background='var(--bg-page-dark)'"
+          >
+            <div class="body-strong">${u.display_name}</div>
+            <div class="micro" style="color: var(--text-secondary-dark);">@${u.username}</div>
+          </div>
+        `).join('');
+
+      } catch (error) {
+        console.error('Error searching users:', error);
+      }
+    };
+
+    window.selectUser = (userId, displayName) => {
+      selectedNewUserId = userId;
+      document.getElementById('searchResults').innerHTML = `
+        <div style="padding: 12px; background: var(--primary-500); border-radius: 8px; color: white;">
+          <div class="body-strong">${displayName}</div>
+          <div class="micro">Selected</div>
+        </div>
+      `;
+      document.getElementById('confirmReplaceBtn').disabled = false;
+    };
+
+    window.confirmReplace = async () => {
+      if (!selectedNewUserId) return;
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/participants/${selectedOldUserId}/replace`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newUserId: selectedNewUserId })
+        });
+
+        if (response.ok) {
+          showAlert('Player replaced successfully', 'success');
+          closeReplaceModal();
+          await loadParticipants();
+        } else {
+          showAlert('Failed to replace player', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error', 'error');
+      }
+    };
+
+    window.promoteToAdmin = async () => {
+      const userId = document.getElementById('promoteSelect').value;
+      
+      if (!userId) {
+        showAlert('Please select a participant', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/admins`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ userId: parseInt(userId) })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showAlert('User promoted to admin successfully', 'success');
+          document.getElementById('promoteSelect').value = '';
+        } else {
+          showAlert(data.error || 'Failed to promote user', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error', 'error');
+      }
+    };
+
+    function showAlert(message, type) {
+      const alertContainer = document.getElementById('alertContainer');
+      alertContainer.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+      window.scrollTo(0, 0);
+      setTimeout(() => {
+        alertContainer.innerHTML = '';
+      }, 5000);
+    }
+
+    loadTournamentName();
+    loadPendingRequests();
+    loadParticipants();
+  </script>
+</body>
+</html>

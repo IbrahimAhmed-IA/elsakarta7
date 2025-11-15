@@ -1,0 +1,1 @@
+{"version": 2, "builds": [{"src": "backend/server.js", "use": "@vercel/node"}], "routes": [{"src": "/(.*)", "dest": "backend/server.js"}], "env": {"SUPABASE_DB_URL": "@supabase_db_url", "NODE_ENV": "production"}}

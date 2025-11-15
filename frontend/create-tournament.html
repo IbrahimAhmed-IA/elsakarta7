@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tournament Manager - Create Tournament</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body class="dark-mode">
+  <nav class="navbar">
+    <div class="container">
+      <a href="dashboard.html" class="navbar-brand">TournamentHub</a>
+      <ul class="navbar-menu">
+        <li><a href="dashboard.html" class="navbar-link">Dashboard</a></li>
+        <li><a href="find-tournament.html" class="navbar-link">Find Tournament</a></li>
+        <li><a href="create-tournament.html" class="navbar-link">Create Tournament</a></li>
+        <li><a href="profile.html" class="navbar-link">Profile</a></li>
+        <li><a href="#" id="logoutBtn" class="navbar-link">Logout</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="container">
+      <div class="page-header">
+        <h2 class="page-title">Create Tournament</h2>
+        <p class="page-description">Set up a new round-robin tournament</p>
+      </div>
+
+      <div id="alertContainer"></div>
+
+      <div class="card" style="max-width: 800px; margin: 0 auto;">
+        <form id="createTournamentForm">
+          <div class="form-group">
+            <label class="form-label" for="tournamentName">Tournament Name</label>
+            <input type="text" id="tournamentName" class="form-input" placeholder="e.g., Spring 2025 Ping Pong League" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="description">Description</label>
+            <textarea id="description" class="form-textarea" placeholder="Describe your tournament..."></textarea>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="startDate">Tournament Start Date</label>
+            <input type="date" id="startDate" class="form-input" required>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="roundRepeats">Round-Robin Repeats</label>
+            <select id="roundRepeats" class="form-select" required>
+              <option value="1">Single Round-Robin (1x)</option>
+              <option value="2">Double Round-Robin (2x)</option>
+              <option value="3">Triple Round-Robin (3x)</option>
+            </select>
+            <p class="micro" style="color: var(--text-secondary-dark); margin-top: 8px;">
+              How many times each player will face every other player
+            </p>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="scoreSubmissionRule">Score Submission</label>
+            <select id="scoreSubmissionRule" class="form-select" required>
+              <option value="admin_only">Only Admins Can Submit Scores</option>
+              <option value="players_can_submit">Players Can Submit Scores</option>
+            </select>
+          </div>
+
+          <div class="flex-between" style="margin-top: 32px;">
+            <a href="dashboard.html" class="btn btn-secondary">Cancel</a>
+            <button type="submit" class="btn btn-primary">Create Tournament</button>
+          </div>
+        </form>
+      </div>
+
+      <div id="successModal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.8); display: flex; align-items: center; justify-content: center; z-index: 1000;">
+        <div class="card" style="max-width: 500px; text-align: center;">
+          <h3 class="card-title">Tournament Created!</h3>
+          <p class="card-description">Share this code with players:</p>
+          <div style="font-size: 48px; font-weight: 700; color: var(--primary-500); margin: 24px 0;" id="tournamentCode"></div>
+          <p class="micro" style="color: var(--text-secondary-dark); margin-bottom: 24px;">
+            Players can use this code to find and join your tournament
+          </p>
+          <button onclick="goToTournament()" class="btn btn-primary" style="width: 100%;">
+            Go to Tournament
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    checkAuth();
+
+    let createdTournamentId = null;
+
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('currentUser');
+      window.location.href = 'index.html';
+    });
+
+    // Set min date to today
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('startDate').setAttribute('min', today);
+
+    document.getElementById('createTournamentForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      
+      const user = getCurrentUser();
+      const name = document.getElementById('tournamentName').value;
+      const description = document.getElementById('description').value;
+      const startDate = document.getElementById('startDate').value;
+      const roundRepeats = document.getElementById('roundRepeats').value;
+      const scoreSubmissionRule = document.getElementById('scoreSubmissionRule').value;
+
+      try {
+        const response = await fetch('http://localhost:3000/api/tournaments', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name,
+            description,
+            startDate,
+            roundRepeats,
+            scoreSubmissionRule,
+            creatorId: user.id
+          })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          createdTournamentId = data.tournamentId;
+          document.getElementById('tournamentCode').textContent = data.code;
+          document.getElementById('successModal').classList.remove('hidden');
+        } else {
+          showAlert(data.error || 'Failed to create tournament', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error. Please try again.', 'error');
+      }
+    });
+
+    function goToTournament() {
+      window.location.href = `tournament.html?id=${createdTournamentId}`;
+    }
+
+    function showAlert(message, type) {
+      const alertContainer = document.getElementById('alertContainer');
+      alertContainer.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+      setTimeout(() => {
+        alertContainer.innerHTML = '';
+      }, 5000);
+    }
+  </script>
+</body>
+</html>

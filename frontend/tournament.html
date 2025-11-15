@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tournament Manager - Tournament</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <a href="dashboard.html" class="navbar-brand">TournamentHub</a>
+      <ul class="navbar-menu">
+        <li><a href="dashboard.html" class="navbar-link">Dashboard</a></li>
+        <li><a href="find-tournament.html" class="navbar-link">Find Tournament</a></li>
+        <li><a href="create-tournament.html" class="navbar-link">Create Tournament</a></li>
+        <li><a href="profile.html" class="navbar-link">Profile</a></li>
+        <li><a href="#" id="logoutBtn" class="navbar-link">Logout</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="container">
+      <div id="alertContainer"></div>
+
+      <div class="page-header flex-between">
+        <div>
+          <h2 class="page-title" id="tournamentName">Loading...</h2>
+          <p class="page-description" id="tournamentDescription"></p>
+        </div>
+        <div id="adminControls" class="hidden flex-gap-sm">
+          <button id="manageBtn" class="btn btn-secondary btn-sm">Manage Tournament</button>
+          <button id="startTournamentBtn" class="btn btn-primary btn-sm hidden">Start Tournament</button>
+        </div>
+      </div>
+
+      <div class="grid grid-2" style="margin-bottom: 48px;">
+        <div class="card">
+          <div class="small" style="color: var(--text-secondary); margin-bottom: 4px;">Tournament Code</div>
+          <div style="font-size: 32px; font-weight: 700; color: var(--primary-500);" id="tournamentCode"></div>
+        </div>
+        <div class="card">
+          <div class="grid grid-2">
+            <div>
+              <div class="small" style="color: var(--text-secondary); margin-bottom: 4px;">Start Date</div>
+              <div class="body-strong" id="startDate"></div>
+            </div>
+            <div>
+              <div class="small" style="color: var(--text-secondary); margin-bottom: 4px;">Status</div>
+              <span class="badge badge-active" id="tournamentStatus"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Standings Section -->
+      <div style="margin-bottom: 64px;">
+        <h3 style="margin-bottom: 24px;">Standings</h3>
+        <div class="card">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Rank</th>
+                <th>Player</th>
+                <th>Wins</th>
+                <th>Losses</th>
+                <th>Win Rate</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody id="standingsTable">
+              <tr>
+                <td colspan="6" class="text-center">No participants yet</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Match Schedule Section -->
+      <div id="matchScheduleSection" class="hidden">
+        <h3 style="margin-bottom: 24px;">Match Schedule</h3>
+        <div id="matchSchedule"></div>
+      </div>
+
+      <div id="pendingSection" class="text-center" style="padding: 64px 0;">
+        <h3 style="color: var(--text-secondary); margin-bottom: 16px;">Tournament Not Started</h3>
+        <p style="color: var(--text-secondary);">Waiting for admin to start the tournament</p>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    checkAuth();
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const tournamentId = urlParams.get('id');
+    let tournament = null;
+    let isAdmin = false;
+    let canSubmitScore = false;
+
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('currentUser');
+      window.location.href = 'index.html';
+    });
+
+    document.getElementById('manageBtn').addEventListener('click', () => {
+      window.location.href = `admin-panel.html?id=${tournamentId}`;
+    });
+
+    async function loadTournament() {
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}`);
+        tournament = await response.json();
+
+        document.getElementById('tournamentName').textContent = tournament.name;
+        document.getElementById('tournamentDescription').textContent = tournament.description || '';
+        document.getElementById('tournamentCode').textContent = tournament.code;
+        document.getElementById('startDate').textContent = new Date(tournament.start_date).toLocaleDateString();
+        document.getElementById('tournamentStatus').textContent = tournament.status;
+
+        // Check if user is admin
+        const user = getCurrentUser();
+        const adminResponse = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/is-admin/${user.id}`);
+        const adminData = await adminResponse.json();
+        isAdmin = adminData.isAdmin;
+
+        if (isAdmin) {
+          document.getElementById('adminControls').classList.remove('hidden');
+          
+          if (tournament.status === 'pending') {
+            document.getElementById('startTournamentBtn').classList.remove('hidden');
+          }
+        }
+
+        // Determine if user can submit scores
+        if (isAdmin) {
+          canSubmitScore = true;
+        } else if (tournament.score_submission_rule === 'players_can_submit') {
+          canSubmitScore = true;
+        }
+
+        await loadStandings();
+        
+        if (tournament.status === 'active') {
+          await loadMatches();
+          document.getElementById('pendingSection').classList.add('hidden');
+          document.getElementById('matchScheduleSection').classList.remove('hidden');
+        }
+
+      } catch (error) {
+        console.error('Error loading tournament:', error);
+        showAlert('Error loading tournament', 'error');
+      }
+    }
+
+    async function loadStandings() {
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/participants`);
+        const participants = await response.json();
+
+        const tableBody = document.getElementById('standingsTable');
+
+        if (participants.length === 0) {
+          tableBody.innerHTML = '<tr><td colspan="6" class="text-center">No participants yet</td></tr>';
+          return;
+        }
+
+        // Calculate win rate and sort
+        participants.forEach(p => {
+          const totalGames = p.wins + p.losses;
+          p.winRate = totalGames > 0 ? ((p.wins / totalGames) * 100).toFixed(1) : '0.0';
+        });
+
+        tableBody.innerHTML = participants.map((p, index) => {
+          const rank = index + 1;
+          const rankBadge = rank <= 3 ? 
+            `<span class="rank-badge rank-${rank}">${rank}</span>` : 
+            `<span>${rank}</span>`;
+          
+          const statusBadge = p.eliminated ? 
+            '<span class="badge badge-denied">Eliminated</span>' : 
+            '<span class="badge badge-approved">Active</span>';
+          
+          const rowClass = p.eliminated ? 'eliminated' : '';
+          
+          return `
+            <tr class="${rowClass}">
+              <td>${rankBadge}</td>
+              <td class="player-name body-strong">${p.display_name}</td>
+              <td>${p.wins}</td>
+              <td>${p.losses}</td>
+              <td>${p.winRate}%</td>
+              <td>${statusBadge}</td>
+            </tr>
+          `;
+        }).join('');
+
+      } catch (error) {
+        console.error('Error loading standings:', error);
+      }
+    }
+
+    async function loadMatches() {
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/matches`);
+        const matches = await response.json();
+
+        // Group matches by round
+        const rounds = {};
+        matches.forEach(match => {
+          if (!rounds[match.round_number]) {
+            rounds[match.round_number] = {
+              date: match.round_date,
+              matches: []
+            };
+          }
+          rounds[match.round_number].matches.push(match);
+        });
+
+        const scheduleContainer = document.getElementById('matchSchedule');
+        scheduleContainer.innerHTML = Object.keys(rounds).sort((a, b) => a - b).map(roundNum => {
+          const round = rounds[roundNum];
+          const roundDate = round.date ? new Date(round.date).toLocaleDateString() : 'TBD';
+          
+          return `
+            <div class="round-section">
+              <div class="round-header">
+                <h4 class="round-title">Round ${roundNum}</h4>
+                <div class="round-date">
+                  ${isAdmin ? `
+                    <input 
+                      type="date" 
+                      value="${round.date || ''}"
+                      onchange="updateRoundDate(${roundNum}, this.value)"
+                      class="form-input" 
+                      style="width: auto; height: 36px; font-size: 14px;"
+                    />
+                  ` : roundDate}
+                </div>
+              </div>
+              <div>
+                ${round.matches.map(match => renderMatch(match)).join('')}
+              </div>
+            </div>
+          `;
+        }).join('');
+
+      } catch (error) {
+        console.error('Error loading matches:', error);
+      }
+    }
+
+    function renderMatch(match) {
+      const isForfeited = match.status === 'forfeited';
+      const isCompleted = match.status === 'completed';
+      const player1Eliminated = match.player1_eliminated;
+      const player2Eliminated = match.player2_eliminated;
+
+      let matchContent = '';
+
+      if (isForfeited) {
+        const winner = match.winner_id === match.player1_id ? match.player1_name : match.player2_name;
+        matchContent = `
+          <div class="match-item">
+            <div class="match-players" style="flex: 1;">
+              <div class="match-player ${player1Eliminated ? 'eliminated' : ''}">${match.player1_name}</div>
+              <div class="match-vs">vs</div>
+              <div class="match-player ${player2Eliminated ? 'eliminated' : ''}">${match.player2_name}</div>
+            </div>
+            <div class="badge badge-denied">Forfeited - ${winner} wins</div>
+          </div>
+        `;
+      } else if (isCompleted) {
+        matchContent = `
+          <div class="match-item">
+            <div class="match-players" style="flex: 1;">
+              <div class="match-player">${match.player1_name}</div>
+              <div class="match-vs">vs</div>
+              <div class="match-player">${match.player2_name}</div>
+            </div>
+            <div class="match-score">
+              <span class="body-strong">${match.player1_score} - ${match.player2_score}</span>
+            </div>
+          </div>
+        `;
+      } else if (canSubmitScore) {
+        matchContent = `
+          <div class="match-item">
+            <div class="match-players" style="flex: 1;">
+              <div class="match-player">${match.player1_name}</div>
+              <div class="match-vs">vs</div>
+              <div class="match-player">${match.player2_name}</div>
+            </div>
+            <div class="match-score">
+              <input 
+                type="number" 
+                class="form-input score-input" 
+                placeholder="0"
+                id="p1score_${match.id}"
+                min="0"
+              />
+              <span>-</span>
+              <input 
+                type="number" 
+                class="form-input score-input" 
+                placeholder="0"
+                id="p2score_${match.id}"
+                min="0"
+              />
+              <button class="btn btn-primary btn-sm" onclick="submitScore(${match.id})">
+                Submit
+              </button>
+            </div>
+          </div>
+        `;
+      } else {
+        matchContent = `
+          <div class="match-item">
+            <div class="match-players" style="flex: 1;">
+              <div class="match-player">${match.player1_name}</div>
+              <div class="match-vs">vs</div>
+              <div class="match-player">${match.player2_name}</div>
+            </div>
+            <div class="badge badge-pending">Scheduled</div>
+          </div>
+        `;
+      }
+
+      return matchContent;
+    }
+
+    window.updateRoundDate = async (roundNumber, date) => {
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/rounds/${roundNumber}/date`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ date })
+        });
+
+        if (response.ok) {
+          showAlert('Round date updated', 'success');
+        } else {
+          showAlert('Failed to update round date', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error', 'error');
+      }
+    };
+
+    window.submitScore = async (matchId) => {
+      const p1Score = parseInt(document.getElementById(`p1score_${matchId}`).value);
+      const p2Score = parseInt(document.getElementById(`p2score_${matchId}`).value);
+
+      if (isNaN(p1Score) || isNaN(p2Score)) {
+        showAlert('Please enter valid scores', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/matches/${matchId}/score`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            player1Score: p1Score, 
+            player2Score: p2Score 
+          })
+        });
+
+        if (response.ok) {
+          showAlert('Score submitted successfully', 'success');
+          await loadStandings();
+          await loadMatches();
+        } else {
+          showAlert('Failed to submit score', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error', 'error');
+      }
+    };
+
+    document.getElementById('startTournamentBtn').addEventListener('click', async () => {
+      if (!confirm('Are you sure you want to start the tournament? This will generate all matches.')) {
+        return;
+      }
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/tournaments/${tournamentId}/start`, {
+          method: 'POST'
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showAlert('Tournament started! Matches generated.', 'success');
+          setTimeout(() => {
+            location.reload();
+          }, 1500);
+        } else {
+          showAlert(data.error || 'Failed to start tournament', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error', 'error');
+      }
+    });
+
+    function showAlert(message, type) {
+      const alertContainer = document.getElementById('alertContainer');
+      alertContainer.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+      window.scrollTo(0, 0);
+      setTimeout(() => {
+        alertContainer.innerHTML = '';
+      }, 5000);
+    }
+
+    loadTournament();
+  </script>
+</body>
+</html>

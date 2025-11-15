@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tournament Manager - Dashboard</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <a href="dashboard.html" class="navbar-brand">TournamentHub</a>
+      <ul class="navbar-menu">
+        <li><a href="dashboard.html" class="navbar-link">Dashboard</a></li>
+        <li><a href="find-tournament.html" class="navbar-link">Find Tournament</a></li>
+        <li><a href="create-tournament.html" class="navbar-link">Create Tournament</a></li>
+        <li><a href="profile.html" class="navbar-link">Profile</a></li>
+        <li><a href="#" id="logoutBtn" class="navbar-link">Logout</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="container">
+      <div class="page-header">
+        <h2 class="page-title">My Tournaments</h2>
+        <p class="page-description">View and manage your active tournaments</p>
+      </div>
+
+      <div id="alertContainer"></div>
+
+      <div id="tournamentsGrid" class="grid grid-2">
+        <div class="flex-center" style="grid-column: 1/-1; padding: 64px 0;">
+          <div class="spinner"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    checkAuth();
+
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('currentUser');
+      window.location.href = 'index.html';
+    });
+
+    async function loadTournaments() {
+      const user = getCurrentUser();
+      if (!user) return;
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/users/${user.id}/tournaments`);
+        const tournaments = await response.json();
+
+        const grid = document.getElementById('tournamentsGrid');
+
+        if (tournaments.length === 0) {
+          grid.innerHTML = `
+            <div class="text-center" style="grid-column: 1/-1; padding: 64px 0;">
+              <h3 style="margin-bottom: 16px; color: var(--text-secondary);">No tournaments yet</h3>
+              <p style="color: var(--text-secondary); margin-bottom: 24px;">Create a tournament or join one to get started</p>
+              <div class="flex-center flex-gap-md">
+                <a href="create-tournament.html" class="btn btn-primary">Create Tournament</a>
+                <a href="find-tournament.html" class="btn btn-secondary">Find Tournament</a>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        grid.innerHTML = tournaments.map(t => {
+          const startDate = new Date(t.start_date).toLocaleDateString();
+          const statusClass = t.participation_status === 'approved' ? 'badge-approved' : 
+                             t.participation_status === 'pending' ? 'badge-pending' : 'badge-active';
+          
+          return `
+            <div class="card card-hover tournament-card" onclick="window.location.href='tournament.html?id=${t.id}'">
+              <h3 class="card-title">${t.name}</h3>
+              <p class="card-description">${t.description || 'No description'}</p>
+              <div class="tournament-meta">
+                <div class="tournament-meta-item">
+                  <span>📅</span>
+                  <span>${startDate}</span>
+                </div>
+                <div class="tournament-meta-item">
+                  <span>👥</span>
+                  <span>${t.participant_count} players</span>
+                </div>
+                <div class="tournament-meta-item">
+                  <span class="badge ${statusClass}">${t.participation_status || t.status}</span>
+                </div>
+                ${t.eliminated ? '<div class="tournament-meta-item"><span class="badge badge-denied">Eliminated</span></div>' : ''}
+              </div>
+            </div>
+          `;
+        }).join('');
+      } catch (error) {
+        console.error('Error loading tournaments:', error);
+        showAlert('Error loading tournaments', 'error');
+      }
+    }
+
+    function showAlert(message, type) {
+      const alertContainer = document.getElementById('alertContainer');
+      alertContainer.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+      setTimeout(() => {
+        alertContainer.innerHTML = '';
+      }, 5000);
+    }
+
+    loadTournaments();
+  </script>
+</body>
+</html>

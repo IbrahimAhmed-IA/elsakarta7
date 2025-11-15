@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tournament Manager - Profile</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <nav class="navbar">
+    <div class="container">
+      <a href="dashboard.html" class="navbar-brand">TournamentHub</a>
+      <ul class="navbar-menu">
+        <li><a href="dashboard.html" class="navbar-link">Dashboard</a></li>
+        <li><a href="find-tournament.html" class="navbar-link">Find Tournament</a></li>
+        <li><a href="create-tournament.html" class="navbar-link">Create Tournament</a></li>
+        <li><a href="profile.html" class="navbar-link">Profile</a></li>
+        <li><a href="#" id="logoutBtn" class="navbar-link">Logout</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <div class="page">
+    <div class="container">
+      <div class="page-header">
+        <h2 class="page-title">My Profile</h2>
+        <p class="page-description">Manage your account settings</p>
+      </div>
+
+      <div id="alertContainer"></div>
+
+      <div class="grid grid-2">
+        <div class="card">
+          <h3 class="card-title">Profile Information</h3>
+          
+          <form id="profileForm">
+            <div class="form-group">
+              <label class="form-label">Username</label>
+              <input type="text" id="username" class="form-input" readonly disabled>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Email</label>
+              <input type="email" id="email" class="form-input" readonly disabled>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="displayName">Display Name</label>
+              <input type="text" id="displayName" class="form-input" placeholder="Your display name" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+              Update Display Name
+            </button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h3 class="card-title">Change Password</h3>
+          
+          <form id="passwordForm">
+            <div class="form-group">
+              <label class="form-label" for="currentPassword">Current Password</label>
+              <input type="password" id="currentPassword" class="form-input" placeholder="Enter current password" required>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="newPassword">New Password</label>
+              <input type="password" id="newPassword" class="form-input" placeholder="Enter new password" required>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label" for="confirmPassword">Confirm New Password</label>
+              <input type="password" id="confirmPassword" class="form-input" placeholder="Confirm new password" required>
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+              Update Password
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/auth.js"></script>
+  <script>
+    checkAuth();
+
+    document.getElementById('logoutBtn').addEventListener('click', (e) => {
+      e.preventDefault();
+      localStorage.removeItem('currentUser');
+      window.location.href = 'index.html';
+    });
+
+    async function loadProfile() {
+      const user = getCurrentUser();
+      if (!user) return;
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/users/${user.id}`);
+        const profile = await response.json();
+
+        document.getElementById('username').value = profile.username;
+        document.getElementById('email').value = profile.email;
+        document.getElementById('displayName').value = profile.display_name;
+      } catch (error) {
+        console.error('Error loading profile:', error);
+      }
+    }
+
+    document.getElementById('profileForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const user = getCurrentUser();
+      const displayName = document.getElementById('displayName').value;
+
+      try {
+        const response = await fetch(`http://localhost:3000/api/users/${user.id}/display-name`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ displayName })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          // Update local storage
+          user.displayName = displayName;
+          localStorage.setItem('currentUser', JSON.stringify(user));
+          showAlert('Display name updated successfully!', 'success');
+        } else {
+          showAlert(data.error || 'Failed to update display name', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error. Please try again.', 'error');
+      }
+    });
+
+    document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const user = getCurrentUser();
+      const currentPassword = document.getElementById('currentPassword').value;
+      const newPassword = document.getElementById('newPassword').value;
+      const confirmPassword = document.getElementById('confirmPassword').value;
+
+      if (newPassword !== confirmPassword) {
+        showAlert('New passwords do not match', 'error');
+        return;
+      }
+
+      try {
+        const response = await fetch('http://localhost:3000/api/auth/update-password', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ 
+            userId: user.id, 
+            currentPassword, 
+            newPassword 
+          })
+        });
+
+        const data = await response.json();
+
+        if (response.ok) {
+          showAlert('Password updated successfully!', 'success');
+          document.getElementById('passwordForm').reset();
+        } else {
+          showAlert(data.error || 'Failed to update password', 'error');
+        }
+      } catch (error) {
+        showAlert('Network error. Please try again.', 'error');
+      }
+    });
+
+    function showAlert(message, type) {
+      const alertContainer = document.getElementById('alertContainer');
+      alertContainer.innerHTML = `<div class="alert alert-${type}">${message}</div>`;
+      setTimeout(() => {
+        alertContainer.innerHTML = '';
+      }, 5000);
+    }
+
+    loadProfile();
+  </script>
+</body>
+</html>
